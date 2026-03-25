@@ -82,6 +82,8 @@ Das Programm benötigt folgende Python-Bibliotheken:
 
 ```
 conda install -c conda-forge osmnx
+```
+```
 pip install pandas openpyxl tqdm
 ```
 
