@@ -24,7 +24,20 @@ Das Programm lädt Kartendaten herunter, schneidet einen beliebigen Ausschnitt a
 
 Folgende Programme müssen einmalig installiert werden, bevor das Tool gestartet werden kann:
 
-### 1. Miniconda (Python-Umgebung)
+### 1. Python
+
+Python ist die Programmiersprache, in der das Tool geschrieben ist.
+
+1. Installer herunterladen: [https://www.python.org/downloads/](https://www.python.org/downloads/) → **„Download Python 3.x.x"**
+2. Installer ausführen
+3. Wichtig: Den Haken bei **„Add Python to PATH"** setzen, bevor auf „Install Now" geklickt wird
+4. Installation abschließen
+
+> Python 3.9 oder neuer wird empfohlen. Die aktuellste Version von der Website ist immer eine gute Wahl.
+
+---
+
+### 2. Miniconda (Python-Umgebung)
 
 Miniconda ist eine schlanke Python-Distribution, die alle nötigen Werkzeuge mitbringt und Pakete sauber voneinander trennt.
 
@@ -40,7 +53,7 @@ Miniconda ist eine schlanke Python-Distribution, die alle nötigen Werkzeuge mit
 
 ---
 
-### 2. osmium-tool (Werkzeug zum Verarbeiten von Kartendateien)
+### 3. osmium-tool (Werkzeug zum Verarbeiten von Kartendateien)
 
 `osmium-tool` ist ein Kommandozeilenprogramm zum Ausschneiden und Konvertieren von OpenStreetMap-Dateien. Es wird über Miniconda installiert.
 
@@ -54,7 +67,7 @@ Die Installation kann einige Minuten dauern. Einmalig ausführen — danach nie 
 
 ---
 
-### 3. Python-Pakete
+### 4. Python-Pakete
 
 Das Programm benötigt folgende Python-Bibliotheken:
 
