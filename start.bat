@@ -9,7 +9,7 @@ echo  ^|     Starte Umgebung...               ^|
 echo  +======================================+
 echo.
 
-REM ── Conda-Root bestimmen ──────────────────────────────────────────
+REM --- Conda-Root bestimmen ---
 set CONDA_ROOT=
 
 if exist "C:\ProgramData\miniconda3\Scripts\conda.exe" (
@@ -42,7 +42,7 @@ exit /b 1
 echo Conda gefunden: %CONDA_ROOT%
 echo.
 
-REM ── Conda-Hook laden und base aktivieren ──────────────────────────
+REM --- Conda-Hook laden und base aktivieren ---
 call "%CONDA_ROOT%\Scripts\activate.bat" base
 if %errorlevel% neq 0 (
     echo FEHLER: Conda-Aktivierung fehlgeschlagen.
@@ -50,7 +50,7 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-REM ── osmium prüfen ─────────────────────────────────────────────────
+REM --- osmium pruefen ---
 where osmium >nul 2>&1
 if %errorlevel% neq 0 (
     echo HINWEIS: osmium nicht im PATH - wird automatisch im Conda-Verzeichnis gesucht.
@@ -58,9 +58,10 @@ if %errorlevel% neq 0 (
     echo.
 )
 
-REM ── Python-Script starten ─────────────────────────────────────────
+REM --- Conda-Python direkt aufrufen (nicht das System-Python im PATH) ---
 set SCRIPT_DIR=%~dp0
-python "%SCRIPT_DIR%main.py"
+set CONDA_ROOT_FOR_PYTHON=%CONDA_ROOT%
+"%CONDA_ROOT%\python.exe" "%SCRIPT_DIR%main.py"
 
 if %errorlevel% neq 0 (
     echo.

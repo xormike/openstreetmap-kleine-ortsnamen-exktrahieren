@@ -54,20 +54,54 @@ if _FEHLENDE:
     print("=" * 60)
     print()
 
+    def _finde_conda_exe():
+        # 1. start.bat hat CONDA_ROOT_FOR_PYTHON gesetzt
+        env_root = os.environ.get("CONDA_ROOT_FOR_PYTHON", "")
+        if env_root:
+            p = Path(env_root) / "Scripts" / "conda.exe"
+            if p.exists():
+                return str(p)
+        # 2. CONDA_PREFIX (gesetzt nach activate.bat)
+        prefix = os.environ.get("CONDA_PREFIX", "")
+        if prefix:
+            p = Path(prefix) / "Scripts" / "conda.exe"
+            if p.exists():
+                return str(p)
+        # 3. shutil.which
+        w = shutil.which("conda")
+        if w:
+            return w
+        # 4. Standard-Installationspfade
+        userprofile = os.environ.get("USERPROFILE", "")
+        localappdata = os.environ.get("LOCALAPPDATA", "")
+        for kandidat in [
+            Path(userprofile) / "miniconda3" / "Scripts" / "conda.exe",
+            Path(userprofile) / "Miniconda3" / "Scripts" / "conda.exe",
+            Path(localappdata) / "miniconda3" / "Scripts" / "conda.exe",
+            Path(r"C:\ProgramData\miniconda3\Scripts\conda.exe"),
+        ]:
+            if kandidat.exists():
+                return str(kandidat)
+        return None
+
     conda_pakete = [p for p in _FEHLENDE if p in ("osmnx",)]
     pip_pakete   = [p for p in _FEHLENDE if p not in conda_pakete]
 
     fehler = False
 
     if conda_pakete:
-        print(f"  conda install -c conda-forge {' '.join(conda_pakete)}")
-        conda_exe = shutil.which("conda") or str(Path(sys.executable).parent / "Scripts" / "conda.exe")
-        r = subprocess.run(
-            [conda_exe, "install", "-c", "conda-forge", "-y"] + conda_pakete,
-            text=True
-        )
-        if r.returncode != 0:
-            print("  FEHLER beim conda-Install.")
+        conda_exe = _finde_conda_exe()
+        if conda_exe:
+            print(f"  conda install -c conda-forge {' '.join(conda_pakete)}")
+            r = subprocess.run(
+                [conda_exe, "install", "-c", "conda-forge", "-y"] + conda_pakete,
+                text=True
+            )
+            if r.returncode != 0:
+                print("  FEHLER beim conda-Install.")
+                fehler = True
+        else:
+            print("  FEHLER: conda.exe nicht gefunden.")
             fehler = True
 
     if pip_pakete:
@@ -83,7 +117,7 @@ if _FEHLENDE:
     if fehler:
         print()
         print("Automatische Installation fehlgeschlagen.")
-        print("Bitte manuell in der Anaconda Prompt (als Administrator) ausfuehren:")
+        print("Bitte manuell in der Anaconda Prompt ausfuehren:")
         if conda_pakete:
             print(f"  conda install -c conda-forge {' '.join(conda_pakete)}")
         if pip_pakete:
