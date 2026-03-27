@@ -54,54 +54,20 @@ if _FEHLENDE:
     print("=" * 60)
     print()
 
-    def _finde_conda_exe():
-        # 1. start.bat hat CONDA_ROOT_FOR_PYTHON gesetzt
-        env_root = os.environ.get("CONDA_ROOT_FOR_PYTHON", "")
-        if env_root:
-            p = Path(env_root) / "Scripts" / "conda.exe"
-            if p.exists():
-                return str(p)
-        # 2. CONDA_PREFIX (gesetzt nach activate.bat)
-        prefix = os.environ.get("CONDA_PREFIX", "")
-        if prefix:
-            p = Path(prefix) / "Scripts" / "conda.exe"
-            if p.exists():
-                return str(p)
-        # 3. shutil.which
-        w = shutil.which("conda")
-        if w:
-            return w
-        # 4. Standard-Installationspfade
-        userprofile = os.environ.get("USERPROFILE", "")
-        localappdata = os.environ.get("LOCALAPPDATA", "")
-        for kandidat in [
-            Path(userprofile) / "miniconda3" / "Scripts" / "conda.exe",
-            Path(userprofile) / "Miniconda3" / "Scripts" / "conda.exe",
-            Path(localappdata) / "miniconda3" / "Scripts" / "conda.exe",
-            Path(r"C:\ProgramData\miniconda3\Scripts\conda.exe"),
-        ]:
-            if kandidat.exists():
-                return str(kandidat)
-        return None
-
     conda_pakete = [p for p in _FEHLENDE if p in ("osmnx",)]
     pip_pakete   = [p for p in _FEHLENDE if p not in conda_pakete]
 
     fehler = False
 
     if conda_pakete:
-        conda_exe = _finde_conda_exe()
-        if conda_exe:
-            print(f"  conda install -c conda-forge {' '.join(conda_pakete)}")
-            r = subprocess.run(
-                [conda_exe, "install", "-c", "conda-forge", "-y"] + conda_pakete,
-                text=True
-            )
-            if r.returncode != 0:
-                print("  FEHLER beim conda-Install.")
-                fehler = True
-        else:
-            print("  FEHLER: conda.exe nicht gefunden.")
+        print(f"  conda install -c conda-forge {' '.join(conda_pakete)}")
+        conda_exe = shutil.which("conda") or str(Path(sys.executable).parent / "Scripts" / "conda.exe")
+        r = subprocess.run(
+            [conda_exe, "install", "-c", "conda-forge", "--solver=classic", "-y"] + conda_pakete,
+            text=True
+        )
+        if r.returncode != 0:
+            print("  FEHLER beim conda-Install.")
             fehler = True
 
     if pip_pakete:
@@ -117,9 +83,9 @@ if _FEHLENDE:
     if fehler:
         print()
         print("Automatische Installation fehlgeschlagen.")
-        print("Bitte manuell in der Anaconda Prompt ausfuehren:")
+        print("Bitte manuell in der Anaconda Prompt (als Administrator) ausfuehren:")
         if conda_pakete:
-            print(f"  conda install -c conda-forge {' '.join(conda_pakete)}")
+            print(f"  conda install -c conda-forge --solver=classic {' '.join(conda_pakete)}")
         if pip_pakete:
             print(f"  pip install {' '.join(pip_pakete)}")
         input("\nEnter zum Beenden...")
@@ -162,8 +128,6 @@ REGIONEN = {
     "Thüringen":            "https://download.geofabrik.de/europe/germany/thueringen-latest.osm.pbf",
     # Österreich
     "Österreich":           "https://download.geofabrik.de/europe/austria-latest.osm.pbf",
-    "Tirol":                "https://download.geofabrik.de/europe/austria/tirol-latest.osm.pbf",
-    "Steiermark":           "https://download.geofabrik.de/europe/austria/steiermark-latest.osm.pbf",
     # Schweiz
     "Schweiz":              "https://download.geofabrik.de/europe/switzerland-latest.osm.pbf",
     # Weitere Europa
@@ -245,9 +209,23 @@ def osmium_pfad():
 
 
 def download_pbf(url, ziel_pfad):
-    """Lädt PBF-Datei mit Fortschrittsbalken herunter."""
-    print(f"\nQuelle: {url}")
-    print(f"Ziel:   {ziel_pfad}")
+    """Lädt PBF-Datei mit Fortschrittsbalken herunter. Wiederholt bei Abbruch."""
+    import urllib.request
+    import threading
+    MIN_GROESSE_MB = 1
+    TIMEOUT_SEKUNDEN = 30  # Abbruch wenn 30s kein neues Datenpaket
+
+    # Erwartete Dateigröße per HEAD-Request abfragen
+    erwartete_mb = None
+    try:
+        req = urllib.request.Request(url, method="HEAD")
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            content_length = resp.headers.get("Content-Length")
+            if content_length:
+                erwartete_mb = int(content_length) / (1024 * 1024)
+                print(f"  Erwartete Groesse: {erwartete_mb:.0f} MB")
+    except Exception:
+        pass  # HEAD fehlgeschlagen — kein Problem, weiter ohne Größeninfo
 
     class FortschrittsHaken(tqdm):
         def update_to(self, b=1, bsize=1, tsize=None):
@@ -255,10 +233,143 @@ def download_pbf(url, ziel_pfad):
                 self.total = tsize
             self.update(b * bsize - self.n)
 
-    with FortschrittsHaken(unit='B', unit_scale=True, unit_divisor=1024,
-                           miniters=1, desc="Download") as t:
-        urllib.request.urlretrieve(url, ziel_pfad, reporthook=t.update_to)
-    print("✅ Download abgeschlossen.")
+    def _download_mit_timeout(url, ziel_pfad, haken):
+        """Lädt herunter und wirft TimeoutError wenn zu lange kein Fortschritt."""
+        letzter_stand = [0]
+        abbruch = [False]
+        fehler = [None]
+
+        def _waechter():
+            import time
+            while not abbruch[0]:
+                stand_vorher = letzter_stand[0]
+                time.sleep(TIMEOUT_SEKUNDEN)
+                if abbruch[0]:
+                    break
+                if letzter_stand[0] == stand_vorher and not abbruch[0]:
+                    fehler[0] = TimeoutError(
+                        f"Kein Fortschritt seit {TIMEOUT_SEKUNDEN} Sekunden — Verbindung eingefroren?"
+                    )
+                    # urllib hat keinen externen Abbruch-Hook, daher Socket schliessen
+                    import socket
+                    try:
+                        socket.setdefaulttimeout(0.001)
+                    except Exception:
+                        pass
+                    break
+
+        waechter = threading.Thread(target=_waechter, daemon=True)
+        waechter.start()
+
+        original_update = haken.update_to
+        def _update_mit_stand(b=1, bsize=1, tsize=None):
+            letzter_stand[0] = b * bsize
+            original_update(b, bsize, tsize)
+        haken.update_to = _update_mit_stand
+
+        try:
+            urllib.request.urlretrieve(url, ziel_pfad, reporthook=haken.update_to)
+        except Exception as e:
+            if fehler[0]:
+                raise fehler[0]
+            raise e
+        finally:
+            abbruch[0] = True
+            import socket
+            socket.setdefaulttimeout(None)
+
+        if fehler[0]:
+            raise fehler[0]
+
+    while True:
+        print(f"\nQuelle: {url}")
+        print(f"Ziel:   {ziel_pfad}")
+        try:
+            with FortschrittsHaken(unit='B', unit_scale=True, unit_divisor=1024,
+                                   miniters=1, desc="Download") as t:
+                _download_mit_timeout(url, ziel_pfad, t)
+        except Exception as e:
+            print(f"\n  Download unterbrochen: {e}")
+            if Path(ziel_pfad).exists():
+                Path(ziel_pfad).unlink()
+            antwort = input("  Erneut versuchen? (j/n) [j]: ").strip().lower()
+            if antwort != "n":
+                continue
+            raise RuntimeError("Download abgebrochen.")
+
+        groesse_mb = Path(ziel_pfad).stat().st_size / (1024 * 1024)
+        # Prüfen: zu klein absolut, oder deutlich kleiner als erwartet
+        zu_klein = groesse_mb < MIN_GROESSE_MB
+        zu_kurz = erwartete_mb and groesse_mb < erwartete_mb * 0.95
+        if zu_klein or zu_kurz:
+            if zu_kurz and not zu_klein:
+                print(f"\n  FEHLER: Datei unvollstaendig ({groesse_mb:.0f} MB von erwartet {erwartete_mb:.0f} MB).")
+            else:
+                print(f"\n  FEHLER: Heruntergeladene Datei ist nur {groesse_mb:.2f} MB gross.")
+            print("  Der Download war wahrscheinlich unvollstaendig (instabile Verbindung).")
+            Path(ziel_pfad).unlink()
+            print()
+            print("  Optionen:")
+            print("  1. Automatisch erneut versuchen")
+            print("  2. Datei manuell herunterladen (Browser oeffnen)")
+            print("  3. Abbrechen")
+            print()
+            while True:
+                wahl = input("  Auswahl (1/2/3): ").strip()
+                if wahl == "1":
+                    break
+                elif wahl == "2":
+                    import webbrowser
+                    webbrowser.open(url)
+                    print()
+                    print("  Datei manuell herunterladen, dann hier fortfahren.")
+                    print()
+                    print(f"  Empfohlen: Datei in diesen Ordner verschieben:")
+                    print(f"  --> {WORK_DIR}")
+                    print()
+                    input("  Enter druecken wenn der Download abgeschlossen ist...")
+                    # Ordner automatisch nach neuen PBF-Dateien durchsuchen (wie Schritt 2)
+                    gefunden = pbf_dateien_suchen()
+                    if gefunden:
+                        print()
+                        print("  Folgende PBF-Dateien wurden gefunden:\n")
+                        for i, p in enumerate(gefunden, 1):
+                            groesse_mb_f = p.stat().st_size / (1024 * 1024)
+                            print(f"    {i}. {p.name}  ({groesse_mb_f:.0f} MB)")
+                            print(f"       {p.parent}")
+                        print()
+                        while True:
+                            auswahl = input("  Nummer der Datei waehlen: ").strip()
+                            try:
+                                idx = int(auswahl) - 1
+                                if 0 <= idx < len(gefunden):
+                                    manuell = gefunden[idx]
+                                    groesse_manuell = manuell.stat().st_size / (1024 * 1024)
+                                    if groesse_manuell < MIN_GROESSE_MB:
+                                        print(f"  Datei zu klein ({groesse_manuell:.2f} MB) — Download unvollstaendig?")
+                                        continue
+                                    import shutil as _shutil
+                                    _shutil.copy2(str(manuell), str(ziel_pfad))
+                                    print(f"✅ Datei uebernommen ({groesse_manuell:.0f} MB).")
+                                    return
+                            except ValueError:
+                                pass
+                            print("  Ungueltige Auswahl.")
+                    else:
+                        print("  Keine PBF-Dateien gefunden.")
+                        print(f"  Bitte Datei manuell in diesen Ordner legen und erneut starten:")
+                        print(f"  --> {WORK_DIR}")
+                        raise RuntimeError("Download abgebrochen.")
+                    break
+                elif wahl == "3":
+                    raise RuntimeError("Download abgebrochen.")
+                else:
+                    print("  Bitte 1, 2 oder 3 eingeben.")
+            if wahl == "1":
+                continue
+
+        print(f"✅ Download abgeschlossen ({groesse_mb:.0f} MB).")
+        break
 
 def bbox_eingabe():
     """Interaktive Bounding-Box-Eingabe mit Validierung."""
@@ -629,8 +740,65 @@ def pbf_herunterladen(url):
         if neu != "j":
             print(f"✅ Verwende vorhandene Datei: {ziel}")
             return ziel
-    download_pbf(url, ziel)
-    return ziel
+
+    while True:
+        try:
+            download_pbf(url, ziel)
+            return ziel
+        except RuntimeError:
+            # Download fehlgeschlagen oder abgebrochen — Optionen anbieten
+            print()
+            print("  Optionen:")
+            print("  1. Automatisch erneut versuchen")
+            print("  2. Datei manuell herunterladen (Browser oeffnen)")
+            print("  3. Abbrechen")
+            print()
+            while True:
+                wahl = input("  Auswahl (1/2/3): ").strip()
+                if wahl == "1":
+                    break  # Schleife erneut
+                elif wahl == "2":
+                    import webbrowser
+                    webbrowser.open(url)
+                    print()
+                    print(f"  Empfohlen: Datei in diesen Ordner verschieben:")
+                    print(f"  --> {WORK_DIR}")
+                    print()
+                    input("  Enter druecken wenn der Download abgeschlossen ist...")
+                    # Automatisch im daten/-Ordner und Standardorten suchen
+                    gefunden = pbf_dateien_suchen()
+                    if gefunden:
+                        print()
+                        print("  Gefundene PBF-Dateien:")
+                        for i, p in enumerate(gefunden, 1):
+                            mb = p.stat().st_size / (1024 * 1024)
+                            print(f"    {i}. {p.name}  ({mb:.0f} MB)  —  {p.parent}")
+                        print()
+                        while True:
+                            nr = input("  Nummer auswaehlen: ").strip()
+                            try:
+                                nr_idx = int(nr) - 1
+                                if 0 <= nr_idx < len(gefunden):
+                                    print(f"  ✅ Verwende: {gefunden[nr_idx]}")
+                                    return gefunden[nr_idx]
+                            except ValueError:
+                                pass
+                            print("  Ungueltige Auswahl.")
+                    else:
+                        print("  Keine PBF-Datei gefunden. Bitte Datei manuell in folgenden Ordner legen:")
+                        print(f"  --> {WORK_DIR}")
+                        input("  Dann Enter druecken...")
+                        # Nochmal suchen
+                        gefunden2 = pbf_dateien_suchen()
+                        if gefunden2:
+                            return gefunden2[0]
+                        print("  Immer noch keine Datei gefunden. Abbruch.")
+                        sys.exit(1)
+                elif wahl == "3":
+                    print("  Abgebrochen.")
+                    sys.exit(0)
+                else:
+                    print("  Bitte 1, 2 oder 3 eingeben.")
 
 
 def main():

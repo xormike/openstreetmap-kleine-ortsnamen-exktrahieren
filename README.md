@@ -14,6 +14,7 @@ Das Programm lädt Kartendaten herunter, schneidet einen beliebigen Ausschnitt a
 - [Bounding Box ermitteln](#bounding-box-ermitteln)
 - [Ausgabe](#ausgabe-xlsx)
 - [Unterstützte Regionen](#unterstützte-regionen)
+- [Download-Verhalten](#download-verhalten)
 - [Dateistruktur](#dateistruktur)
 - [RAM-Empfehlung](#ram-empfehlung)
 - [Häufige Probleme](#häufige-probleme)
@@ -81,11 +82,11 @@ Das Programm benötigt folgende Python-Bibliotheken:
 **Fehlende Pakete werden beim ersten Programmstart automatisch installiert.** Falls die automatische Installation fehlschlägt, können sie manuell in der Anaconda Prompt nachinstalliert werden:
 
 ```
-conda install -c conda-forge osmnx
-```
-```
+conda install -c conda-forge osmnx --solver=classic
 pip install pandas openpyxl tqdm
 ```
+
+> **Hinweis zu `--solver=classic`:** Der Flag stellt sicher dass Conda kompatible Paketversionen findet, auch wenn ein alternativer Solver (libmamba) installiert oder fehlerhaft konfiguriert ist.
 
 > **Hinweis zu `pathlib`:** Die Python-Standardbibliothek `pathlib` (wird intern für sichere Pfadverarbeitung verwendet, auch bei Pfaden mit Leerzeichen) ist bereits in Python 3.4+ enthalten und muss **nicht** extra installiert werden.
 
@@ -117,14 +118,16 @@ Nummer aus der Liste wählen (z. B. 1 für Bayern)
 ────────────────────────────────────────────────────────────
   2/5 · PBF-Datei
 ────────────────────────────────────────────────────────────
-Bereits vorhandene Dateien werden angezeigt und können
-wiederverwendet werden — sonst automatischer Download.
+Vorhandene PBF-Dateien auf dem System werden automatisch
+gefunden und zur Auswahl angeboten — oder automatischer
+Download mit Fortschrittsbalken.
 
 ────────────────────────────────────────────────────────────
   3/5 · Bounding Box
 ────────────────────────────────────────────────────────────
 Browser öffnet sich automatisch → Region einzeichnen →
-4 Koordinaten kopieren → ins Terminal einfügen
+4 Koordinaten kopieren → ins Terminal einfügen.
+Ein Popup-Fenster erinnert an das richtige Kopierformat.
 
 ────────────────────────────────────────────────────────────
   4/5 · Ausschneiden & Konvertieren
@@ -150,6 +153,8 @@ Eine Bounding Box ist ein rechteckiger Kartenausschnitt, der durch zwei Koordina
 3. **Unten links das Format auf `CSV` umstellen** — nicht `MARC` oder andere Formate!
 4. Die 4 angezeigten Zahlen kopieren (sehen so aus: `11.360232,48.061602,11.722837,48.248220`)
 5. Ins Terminal einfügen und Enter drücken
+
+> Ein Windows-Popup erscheint automatisch 3 Sekunden nach dem Browser-Start als Erinnerung ans richtige Format.
 
 > Das Format ist immer: `min_längengrad, min_breitengrad, max_längengrad, max_breitengrad`
 > Beispiel München: `11.360232,48.061602,11.722837,48.248220`
@@ -198,13 +203,34 @@ Das Programm enthält vordefinierte Download-Links für folgende Regionen:
 
 **Deutschland:** Bayern, Baden-Württemberg, Berlin, Brandenburg, Bremen, Hamburg, Hessen, Mecklenburg-Vorpommern, Niedersachsen, Nordrhein-Westfalen, Rheinland-Pfalz, Saarland, Sachsen, Sachsen-Anhalt, Schleswig-Holstein, Thüringen
 
-**Österreich:** Gesamtösterreich, Tirol, Steiermark
+**Österreich:** Gesamtösterreich
 
 **Schweiz:** Gesamtschweiz
 
 **Weitere Europa:** Italien, Frankreich, Spanien, Polen, Tschechien
 
 Für jede andere Region der Welt kann unter „Eigene URL eingeben" ein direkter Link von [download.geofabrik.de](https://download.geofabrik.de) eingegeben werden.
+
+---
+
+## Download-Verhalten
+
+Das Programm erkennt automatisch bereits vorhandene PBF-Dateien — durchsucht werden:
+
+- der `daten/`-Unterordner im Programmverzeichnis
+- das Programmverzeichnis selbst
+- der Download-Ordner des Benutzers
+- Laufwerk D:\ (falls vorhanden)
+
+Gefundene Dateien werden als nummerierte Liste angeboten und können direkt wiederverwendet werden, ohne erneut herunterzuladen.
+
+**Bei einem fehlgeschlagenen oder unvollständigen Download** erscheinen drei Optionen:
+
+1. Automatisch erneut versuchen
+2. Datei manuell herunterladen — der Browser öffnet sich direkt mit dem Geofabrik-Link. Nach dem Download einfach Enter drücken; das Programm sucht dann automatisch nach der neuen Datei und zeigt sie zur Auswahl an — kein manuelles Eintippen eines Pfades nötig.
+3. Abbrechen
+
+Das Programm prüft außerdem die Dateigröße nach dem Download (Abgleich mit der erwarteten Größe vom Server) und erkennt so unvollständige Downloads zuverlässig, auch bei instabiler Internetverbindung.
 
 ---
 
@@ -222,7 +248,7 @@ osm-extraktor/
     └── kleinorte_Bayern_mein_ausschnitt.xlsx  ← Ergebnis
 ```
 
-> Die `.osm.pbf`- und `.osm`-Dateien können nach Abschluss gelöscht werden — nur die `.xlsx` ist das eigentliche Ergebnis. Die großen PBF-Dateien (Bayern z. B. ~1 GB) können für spätere Abfragen wiederverwendet werden — das Programm fragt beim nächsten Start ob sie neu geladen werden sollen.
+> Die `.osm.pbf`- und `.osm`-Dateien können nach Abschluss gelöscht werden — nur die `.xlsx` ist das eigentliche Ergebnis. Die großen PBF-Dateien (Bayern z. B. ~1 GB) können für spätere Abfragen wiederverwendet werden — das Programm erkennt sie beim nächsten Start automatisch.
 
 ---
 
@@ -248,11 +274,14 @@ Für große Bundesländer empfiehlt es sich, nur den benötigten Ausschnitt zu v
 **„EnvironmentNotWritableError"**
 → Miniconda wurde systemweit unter `C:\ProgramData\` installiert. Entweder die Anaconda Prompt als Administrator öffnen, oder Miniconda neu installieren mit der Option „Just Me".
 
+**osmnx lässt sich nicht installieren / ImportError bei shapely**
+→ In der Anaconda Prompt ausführen: `conda install -c conda-forge osmnx --solver=classic`. Der Flag `--solver=classic` vermeidet Versionskonflikte zwischen osmnx und shapely, die auf manchen Systemen auftreten.
+
 **Keine Orte gefunden**
 → Die Bounding Box prüfen. Häufiger Fehler: Das Format war nicht auf `CSV` gestellt, sondern auf `MARC` oder `DublinCore` — dann haben die Koordinaten ein anderes Format.
 
-**Download bricht ab**
-→ Internetverbindung prüfen. Die Dateien sind groß (Bayern ~800 MB). Das Programm bietet beim nächsten Start an, vorhandene Dateien wiederzuverwenden.
+**Download bricht ab / Datei zu klein**
+→ Das Programm erkennt unvollständige Downloads automatisch anhand der Dateigröße und bietet an, erneut zu versuchen oder die Datei manuell herunterzuladen. Bei instabiler Verbindung einfach die manuelle Option wählen und die Datei über den Browser laden — danach Enter drücken, das Programm findet die Datei automatisch.
 
 **Fehlende Gemeinde-Spalte**
 → Die Gemeindezugehörigkeit wird direkt aus OSM gelesen. Nicht alle Orte haben dieses Feld in OSM eingetragen — leere Zellen sind normal.
@@ -270,3 +299,8 @@ Das Programm kombiniert drei Werkzeuge:
 Die Datenquelle ist [Geofabrik](https://www.geofabrik.de), die täglich aktuelle OSM-Exporte für alle Regionen der Welt bereitstellt — kostenlos und ohne Registrierung.
 
 ---
+
+## Lizenz
+
+Dieses Tool ist für den persönlichen und nicht-kommerziellen Gebrauch gedacht.
+Die verwendeten Kartendaten stammen von OpenStreetMap und stehen unter der [ODbL-Lizenz](https://www.openstreetmap.org/copyright).
