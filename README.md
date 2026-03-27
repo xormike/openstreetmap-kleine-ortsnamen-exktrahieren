@@ -297,10 +297,3 @@ Das Programm kombiniert drei Werkzeuge:
 - **pathlib** — Python-Standardbibliothek für betriebssystemunabhängige Pfadverarbeitung (behandelt Leerzeichen in Pfaden automatisch korrekt)
 
 Die Datenquelle ist [Geofabrik](https://www.geofabrik.de), die täglich aktuelle OSM-Exporte für alle Regionen der Welt bereitstellt — kostenlos und ohne Registrierung.
-
----
-
-## Lizenz
-
-Dieses Tool ist für den persönlichen und nicht-kommerziellen Gebrauch gedacht.
-Die verwendeten Kartendaten stammen von OpenStreetMap und stehen unter der [ODbL-Lizenz](https://www.openstreetmap.org/copyright).
