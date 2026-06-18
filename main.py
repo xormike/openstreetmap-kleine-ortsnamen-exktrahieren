@@ -443,17 +443,21 @@ def analysieren(osm_datei):
 
     df = gdf[spalten].copy()
     df = df.dropna(subset=["name"]).drop_duplicates(subset=["name", "place"])
-    df = df.reset_index(drop=True)
 
-    # Koordinaten hinzufügen (Centroid bei Polygonen)
+    # Koordinaten VOR reset_index ermitteln — danach stimmt der Index nicht mehr mit gdf überein
     try:
         geom = gdf.loc[df.index, "geometry"]
         centroids = geom.centroid
-        df["lat"] = centroids.y.round(6)
-        df["lon"] = centroids.x.round(6)
-    except Exception:
-        df["lat"] = None
-        df["lon"] = None
+        lat_arr = centroids.y.round(6).values
+        lon_arr = centroids.x.round(6).values
+    except Exception as e:
+        print(f"  Warnung: Koordinaten konnten nicht ermittelt werden: {e}")
+        lat_arr = None
+        lon_arr = None
+
+    df = df.reset_index(drop=True)
+    df["lat"] = lat_arr
+    df["lon"] = lon_arr
 
     print(f"✅ {len(df)} Orte gefunden.")
     return df
@@ -489,6 +493,7 @@ def xlsx_exportieren(df, pfad, region_name, bbox):
     SECTION_FONT  = Font(bold=True, color="FFFFFF", name="Arial", size=10)
     TITLE_FONT    = Font(bold=True, color="FFFFFF", name="Arial", size=13)
     BODY_FONT     = Font(name="Arial", size=10)
+    LINK_FONT     = Font(name="Arial", size=10, color="0563C1", underline="single")
 
     thin = Side(style="thin", color="BDD7EE")
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
@@ -511,18 +516,33 @@ def xlsx_exportieren(df, pfad, region_name, bbox):
         if fill:
             zelle.fill = fill
 
+    def linkcell(zelle, lat, lon, fill=None):
+        """Schreibt anklickbaren OSM-Link in die Zelle, oder leer wenn keine Koordinaten."""
+        if lat is not None and lon is not None:
+            url = f"https://www.openstreetmap.org/?mlat={lat}&mlon={lon}#map=16/{lat}/{lon}"
+            zelle.value = "OSM ↗"
+            zelle.hyperlink = url
+            zelle.font = LINK_FONT
+        else:
+            zelle.value = ""
+            zelle.font = BODY_FONT
+        zelle.alignment = center
+        zelle.border = border
+        if fill:
+            zelle.fill = fill
+
     # Titelzeile
-    ws1.merge_cells("A1:E1")
+    ws1.merge_cells("A1:G1")
     kopfzelle(ws1["A1"], f"OSM Kleinort-Auswertung — {region_name}", TITLE_FILL, TITLE_FONT)
     ws1.row_dimensions[1].height = 28
 
     # Metadaten
-    ws1.merge_cells("A2:E2")
+    ws1.merge_cells("A2:G2")
     bbox_text = f"Bounding Box: {bbox[0]}, {bbox[1]}, {bbox[2]}, {bbox[3]}"
     kopfzelle(ws1["A2"], bbox_text, PatternFill("solid", fgColor="1A3A54"), Font(color="AACCE8", name="Arial", size=9))
 
     # Spaltenheader
-    headers = ["Nr.", "Name", "Ortstyp (DE)", "Ortstyp (OSM)", "Gemeinde"]
+    headers = ["Nr.", "Name", "Ortstyp (DE)", "Ortstyp (OSM)", "Gemeinde", "Koordinaten", "OSM-Link"]
     for col, h in enumerate(headers, 1):
         kopfzelle(ws1.cell(3, col), h)
     ws1.row_dimensions[3].height = 22
@@ -538,7 +558,7 @@ def xlsx_exportieren(df, pfad, region_name, bbox):
 
     for ortstyp_de, gruppe in df_sorted.groupby("ortstyp_de"):
         # Abschnittsheader
-        ws1.merge_cells(f"A{zeile}:E{zeile}")
+        ws1.merge_cells(f"A{zeile}:G{zeile}")
         kopfzelle(ws1.cell(zeile, 1), f"{ortstyp_de}  ({len(gruppe)} Einträge)", SECTION_FILL, SECTION_FONT)
         ws1.row_dimensions[zeile].height = 20
         zeile += 1
@@ -546,30 +566,35 @@ def xlsx_exportieren(df, pfad, region_name, bbox):
         for i, (_, row) in enumerate(gruppe.iterrows()):
             fill = ALT_FILL if i % 2 == 0 else None
             osm_typ = row.get("place", "")
+            lat = row.get("lat")
+            lon = row.get("lon")
+            koordinaten = f"{lat}, {lon}" if lat is not None and lon is not None else ""
 
             datenzelle(ws1.cell(zeile, 1), gesamt_nr, fill, center)
             datenzelle(ws1.cell(zeile, 2), row.get("name", ""), fill)
             datenzelle(ws1.cell(zeile, 3), ORTSTYP_DE.get(osm_typ, osm_typ.capitalize()), fill)
             datenzelle(ws1.cell(zeile, 4), osm_typ, fill)
             datenzelle(ws1.cell(zeile, 5), row.get("gemeinde", ""), fill)
+            datenzelle(ws1.cell(zeile, 6), koordinaten, fill, center)
+            linkcell(ws1.cell(zeile, 7), lat, lon, fill)
 
             ws1.row_dimensions[zeile].height = 18
             zeile += 1
             gesamt_nr += 1
 
     # Summenzeile
-    ws1.merge_cells(f"A{zeile}:E{zeile}")
+    ws1.merge_cells(f"A{zeile}:G{zeile}")
     kopfzelle(ws1.cell(zeile, 1), f"Gesamt: {len(df_sorted)} Orte", HEADER_FILL)
     ws1.row_dimensions[zeile].height = 20
 
     # Spaltenbreiten
-    for col, breite in zip(range(1, 6), [6, 28, 18, 16, 24]):
+    for col, breite in zip(range(1, 8), [6, 28, 18, 16, 24, 22, 10]):
         ws1.column_dimensions[get_column_letter(col)].width = breite
 
     # ── Blatt 2: Alphabetische Liste ─────────────────────────────────
     ws2 = wb.create_sheet("Alphabetisch")
 
-    ws2.merge_cells("A1:E1")
+    ws2.merge_cells("A1:G1")
     kopfzelle(ws2["A1"], "Alle Orte — alphabetisch", TITLE_FILL, TITLE_FONT)
     ws2.row_dimensions[1].height = 28
 
@@ -581,14 +606,19 @@ def xlsx_exportieren(df, pfad, region_name, bbox):
         z = i + 3
         fill = ALT_FILL if i % 2 == 0 else None
         osm_typ = row.get("place", "")
+        lat = row.get("lat")
+        lon = row.get("lon")
+        koordinaten = f"{lat}, {lon}" if lat is not None and lon is not None else ""
         datenzelle(ws2.cell(z, 1), i + 1, fill, center)
         datenzelle(ws2.cell(z, 2), row.get("name", ""), fill)
         datenzelle(ws2.cell(z, 3), ORTSTYP_DE.get(osm_typ, osm_typ.capitalize()), fill)
         datenzelle(ws2.cell(z, 4), osm_typ, fill)
         datenzelle(ws2.cell(z, 5), row.get("gemeinde", ""), fill)
+        datenzelle(ws2.cell(z, 6), koordinaten, fill, center)
+        linkcell(ws2.cell(z, 7), lat, lon, fill)
         ws2.row_dimensions[z].height = 18
 
-    for col, breite in zip(range(1, 6), [6, 28, 18, 16, 24]):
+    for col, breite in zip(range(1, 8), [6, 28, 18, 16, 24, 22, 10]):
         ws2.column_dimensions[get_column_letter(col)].width = breite
 
     # ── Blatt 3: Statistik ────────────────────────────────────────────
